@@ -1,0 +1,25 @@
+name: Build Windows EXE
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Download OCR languages
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tessdata
+          Invoke-WebRequest https://github.com/tesseract-ocr/tessdata_fast/raw/main/rus.traineddata -OutFile tessdata/rus.traineddata
+          Invoke-WebRequest https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata -OutFile tessdata/eng.traineddata
+      - name: Publish portable EXE
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o publish
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Colizeum-Reports-Windows
+          path: publish/
