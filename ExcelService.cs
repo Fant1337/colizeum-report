@@ -45,7 +45,13 @@ public static class ExcelService
 
     private static IXLWorksheet FindMonthSheet(XLWorkbook wb, DateTime date)
     {
-        var month = date.ToString("MMMM", new System.Globalization.CultureInfo("ru-RU")).ToUpperInvariant();
+        var month = date.Month switch
+        {
+            1 => "ЯНВАРЬ", 2 => "ФЕВРАЛЬ", 3 => "МАРТ", 4 => "АПРЕЛЬ",
+            5 => "МАЙ", 6 => "ИЮНЬ", 7 => "ИЮЛЬ", 8 => "АВГУСТ",
+            9 => "СЕНТЯБРЬ", 10 => "ОКТЯБРЬ", 11 => "НОЯБРЬ", 12 => "ДЕКАБРЬ",
+            _ => throw new ArgumentOutOfRangeException(nameof(date))
+        };
         return wb.Worksheets.FirstOrDefault(x => x.Name.Trim().Equals(month, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"В книге не найден лист «{month}».");
     }

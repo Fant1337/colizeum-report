@@ -22,11 +22,14 @@ public sealed class ReportData
     public decimal Fee { get; set; }
     public decimal ExtraGuest { get; set; }
     public int HookahCount { get; set; }
-    public decimal Hookah => HookahCount * 1000m;
+    public decimal Hookah => HookahCount * 250m;
 
     public decimal Total => Revenue + OnlinePayments;
-    public decimal GameTime => AccountTopUps + Services + OtherIncome + OnlinePayments;
+    // Mirrors the workbook's formula: cash + all cashless payments - food.
+    public decimal GameTime => Cash + Cashless - Food;
     public decimal Cashless => Acquiring + OnlinePayments;
+    public decimal RevenueDifference => Revenue - Cash - Acquiring;
+    public bool RevenueReconciles => Math.Abs(RevenueDifference) <= 1m;
     public decimal ShiftSalary => Total switch
     {
         >= 30000 => 3250,
@@ -41,7 +44,7 @@ public sealed class ReportData
     private static string M(decimal value, bool decimals = true) =>
         value.ToString(decimals ? "N2" : "N0", CultureInfo.GetCultureInfo("ru-RU"));
 
-    public string TelegramText() => $"""{Admin} {Date:dd.MM.yyyy} {Shift}
+    public string TelegramText() => $@"{Admin} {Date:dd.MM.yyyy} {Shift}
 ========================
 💵Итого за смену - {M(Total)}
 🕹Игровое время - {M(GameTime)}
@@ -55,8 +58,8 @@ public sealed class ReportData
 Доп гость ПС - {M(ExtraGuest, false)}
 Кальян - {M(Hookah, false)}
 ==========
-В конверте: {M(Envelope, false)}
+В конверте:  {M(Envelope, false)}
 Остаток нал в кассе: {M(CashRemainder, false)}
 Смену сдал: {Admin}
-Смену принял: {Receiver}""";
+Смену принял: {Receiver}";
 }

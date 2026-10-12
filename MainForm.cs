@@ -18,9 +18,13 @@ public sealed class MainForm : Form
     private TextBox preview = null!;
     private Label salary = null!;
     private Label pasteStatus = null!;
+    private Label reconciliation = null!;
+    private Button excelButton = null!;
+    private bool ocrLoaded;
 
     public MainForm()
     {
+        excelPath = AppDb.GetExcelPath();
         Text = "Colizeum Reports"; Width = 1220; Height = 820; MinimumSize = new Size(1000, 680);
         BackColor = Bg; ForeColor = Color.White; Font = new Font("Segoe UI", 10); KeyPreview = true;
         ShowAdminSelection();
@@ -50,12 +54,13 @@ public sealed class MainForm : Form
 
     private void ShowReport()
     {
-        reportPage = true; Controls.Clear(); nums.Clear();
+        reportPage = true; ocrLoaded = false; Controls.Clear(); nums.Clear();
         receiver = Combo(Admins); receiver.SelectedIndex = Math.Max(0, Array.IndexOf(Admins, selectedAdmin) + 1) % Admins.Length;
         shift = Combo(["день", "ночь"]); shift.SelectedIndex = DateTime.Now.Hour >= 20 || DateTime.Now.Hour < 8 ? 1 : 0;
         date = new DateTimePicker { Format = DateTimePickerFormat.Custom, CustomFormat = "dd.MM.yyyy", Width = 190, CalendarForeColor = Color.Black };
         preview = new TextBox { Multiline = true, ScrollBars = ScrollBars.Vertical, ReadOnly = true, Dock = DockStyle.Fill, Font = new Font("Segoe UI Emoji", 11), BackColor = Color.FromArgb(25, 26, 29), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
         salary = new Label { AutoSize = true, Font = new Font("Segoe UI", 13, FontStyle.Bold), ForeColor = Yellow, Margin = new Padding(0, 8, 0, 8) };
+        reconciliation = new Label { AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = Color.Silver, Margin = new Padding(0, 2, 0, 6) };
         pasteStatus = new Label { Text = "Скопируйте скрин LGS и нажмите Ctrl+V", AutoSize = true, ForeColor = Color.Silver, Margin = new Padding(0, 0, 0, 8) };
 
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 2, RowCount = 2 };
@@ -71,18 +76,20 @@ public sealed class MainForm : Form
         var drop = new Panel { Width = 570, Height = 92, BackColor = Card, Margin = new Padding(0, 8, 0, 8) };
         drop.Controls.Add(new Label { Text = "ВСТАВИТЬ СКРИН LGS  ·  CTRL+V", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 13, FontStyle.Bold), ForeColor = Yellow });
         left.Controls.Add(drop); left.Controls.Add(pasteStatus);
-        left.Controls.Add(DarkButton("Выбрать рабочую таблицу Excel", 570, (_, _) => ChooseExcel()));
+        left.Controls.Add(DarkButton("Выбрать скриншот файлом", 570, (_, _) => ChooseScreenshot()));
+        excelButton = DarkButton(excelPath is not null && File.Exists(excelPath) ? "Excel подключён · изменить" : "Выбрать рабочую таблицу Excel", 570, (_, _) => ChooseExcel());
+        left.Controls.Add(excelButton);
         foreach (var item in new[] { ("Выручка LGS", "revenue"), ("Пополнение аккаунтов", "topups"), ("Услуги", "services"), ("Еда / бар", "food"), ("Прочие доходы", "other"), ("Наличные", "cash"), ("Эквайринг", "acquiring"), ("Онлайн-платежи / СБП", "online"), ("Расход", "expenses"), ("Сбор", "fee"), ("Количество кальянов", "hookahs"), ("Доп. гость ПС", "guest"), ("В конверте", "envelope"), ("Остаток наличных", "remainder") })
         {
             var n = new NumericUpDown { DecimalPlaces = item.Item2 == "hookahs" ? 0 : 2, Maximum = 10000000, ThousandsSeparator = true, Width = 240, BackColor = Card, ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
             n.ValueChanged += (_, _) => RefreshPreview(); nums[item.Item2] = n; left.Controls.Add(Row(item.Item1, n));
         }
         root.Controls.Add(left, 0, 1);
-        var right = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5 };
-        right.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 52)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 58)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 58)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 8));
-        right.Controls.Add(preview, 0, 0); right.Controls.Add(salary, 0, 1);
-        right.Controls.Add(ActionButton("Заполнить Excel", 460, (_, _) => SaveExcel()), 0, 2);
-        right.Controls.Add(DarkButton("Скопировать отчёт для Telegram", 460, (_, _) => { Clipboard.SetText(Current().TelegramText()); MessageBox.Show("Отчёт скопирован. Вставьте его в Telegram.", "Готово"); }), 0, 3);
+        var right = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 6 };
+        right.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 52)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 58)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 58)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 8));
+        right.Controls.Add(preview, 0, 0); right.Controls.Add(salary, 0, 1); right.Controls.Add(reconciliation, 0, 2);
+        right.Controls.Add(ActionButton("Заполнить Excel", 460, (_, _) => SaveExcel()), 0, 3);
+        right.Controls.Add(DarkButton("Скопировать отчёт для Telegram", 460, (_, _) => CopyTelegram()), 0, 4);
         root.Controls.Add(right, 1, 1); Controls.Add(root);
         foreach (Control c in new Control[] { receiver, shift, date }) c.TextChanged += (_, _) => RefreshPreview();
         RefreshPreview();
@@ -90,18 +97,37 @@ public sealed class MainForm : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        if (reportPage && keyData == (Keys.Control | Keys.V) && Clipboard.ContainsImage())
+        if (reportPage && keyData == (Keys.Control | Keys.V))
         {
-            try
-            {
-                using var image = Clipboard.GetImage()!; var path = Path.Combine(Path.GetTempPath(), $"colizeum_{Guid.NewGuid():N}.png"); image.Save(path);
-                pasteStatus.Text = "Распознаю скрин…"; pasteStatus.ForeColor = Yellow; Application.DoEvents();
-                Apply(OcrService.Read(path)); File.Delete(path); pasteStatus.Text = "✓ Скрин распознан — проверьте суммы"; pasteStatus.ForeColor = Color.LightGreen;
-            }
-            catch (Exception ex) { pasteStatus.Text = "Не удалось распознать: " + ex.Message; pasteStatus.ForeColor = Color.Salmon; }
+            if (!Clipboard.ContainsImage()) { pasteStatus.Text = "В буфере нет изображения. Скопируйте скрин LGS."; pasteStatus.ForeColor = Color.Salmon; return true; }
+            var path = Path.Combine(Path.GetTempPath(), $"colizeum_{Guid.NewGuid():N}.png");
+            try { using var image = Clipboard.GetImage()!; image.Save(path); ReadScreenshot(path); }
+            catch (Exception ex) { pasteStatus.Text = "Не удалось прочитать скрин: " + ex.Message; pasteStatus.ForeColor = Color.Salmon; }
+            finally { if (File.Exists(path)) File.Delete(path); }
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private void ChooseScreenshot()
+    {
+        using var dlg = new OpenFileDialog { Filter = "Изображения (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|Все файлы (*.*)|*.*" };
+        if (dlg.ShowDialog() == DialogResult.OK) ReadScreenshot(dlg.FileName);
+    }
+
+    private void ReadScreenshot(string path)
+    {
+        try
+        {
+            pasteStatus.Text = "Распознаю скрин…"; pasteStatus.ForeColor = Yellow; Application.DoEvents();
+            var result = OcrService.Read(path); Apply(result.Data); ocrLoaded = true;
+            pasteStatus.Text = result.MissingFields.Count == 0
+                ? "✓ Скрин распознан. Сверьте суммы и заполните поля, которых нет в LGS."
+                : "⚠ Не распознано: " + string.Join(", ", result.MissingFields) + ". Проверьте эти поля вручную.";
+            pasteStatus.ForeColor = result.MissingFields.Count == 0 ? Color.LightGreen : Color.DarkOrange;
+            RefreshPreview();
+        }
+        catch (Exception ex) { pasteStatus.Text = "Не удалось распознать: " + ex.Message; pasteStatus.ForeColor = Color.Salmon; }
     }
 
     private void OpenStats(string admin)
@@ -118,8 +144,10 @@ public sealed class MainForm : Form
             var pin = PromptPin($"{admin}: введите PIN", "Личная статистика"); if (pin is null) return;
             if (!AppDb.VerifyPin(admin, pin)) { MessageBox.Show("Неверный PIN."); return; }
         }
-        var s = AppDb.Stats(admin, DateTime.Today); var period = DateTime.Today.Day <= 15 ? "1–15" : $"16–{DateTime.DaysInMonth(DateTime.Today.Year, DateTime.Today.Month)}";
-        MessageBox.Show($"Период: {period}\n\nСмен: {s.shifts}\nВыручка: {s.revenue:N0} ₽\nКальянов: {s.hookahs}\nНачислено: {s.salary:N0} ₽", $"Статистика · {admin}");
+        var today = DateTime.Today; var s = AppDb.Stats(admin, today);
+        var period = today.Day <= 15 ? $"1–15 {today:MMMM yyyy}" : $"16–{DateTime.DaysInMonth(today.Year, today.Month)} {today:MMMM yyyy}";
+        var payout = today.Day <= 15 ? new DateTime(today.Year, today.Month, 20) : new DateTime(today.Year, today.Month, 1).AddMonths(1).AddDays(4);
+        MessageBox.Show($"Период: {period}\nВыплата: {payout:dd.MM.yyyy}\n\nСмен: {s.shifts}\nВыручка: {s.revenue:N0} ₽\nКальянов: {s.hookahs}\nНачислено: {s.salary:N0} ₽", $"Статистика · {admin}");
     }
 
     private static string? PromptPin(string label, string title)
@@ -131,16 +159,38 @@ public sealed class MainForm : Form
         f.Controls.AddRange([l, box, ok]); f.AcceptButton = ok; return f.ShowDialog() == DialogResult.OK ? box.Text : null;
     }
 
-    private void ChooseExcel() { using var dlg = new OpenFileDialog { Filter = "Excel (*.xlsx)|*.xlsx" }; if (dlg.ShowDialog() == DialogResult.OK) { excelPath = dlg.FileName; MessageBox.Show("Таблица подключена. Формулы и прошлые дни защищены.", "Готово"); } }
+    private void ChooseExcel() { using var dlg = new OpenFileDialog { Filter = "Excel (*.xlsx)|*.xlsx", FileName = excelPath is not null && File.Exists(excelPath) ? excelPath : "" }; if (dlg.ShowDialog() == DialogResult.OK) { excelPath = dlg.FileName; AppDb.SetExcelPath(excelPath); excelButton.Text = "Excel подключён · изменить"; MessageBox.Show("Таблица подключена и будет сохранена для следующих запусков.", "Готово"); } }
     private void SaveExcel()
     {
-        try { if (excelPath is null) { ChooseExcel(); if (excelPath is null) return; } var d = Current(); var path = ExcelService.FillExisting(excelPath, d); AppDb.SaveReport(d); MessageBox.Show("Смена записана. Формулы проверены, резервная копия создана.", "Готово"); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+        try
+        {
+            if (excelPath is null || !File.Exists(excelPath)) { ChooseExcel(); if (excelPath is null || !File.Exists(excelPath)) return; }
+            var d = Current(); if (!ConfirmReportValues(d)) return;
+            var path = ExcelService.FillExisting(excelPath, d); AppDb.SaveReport(d);
+            MessageBox.Show("Смена записана. Формулы проверены, резервная копия создана.", "Готово");
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
         catch (Exception ex) { MessageBox.Show(ex.Message, "Сохранение отменено"); }
+    }
+
+    private void CopyTelegram()
+    {
+        var data = Current(); if (!ConfirmReportValues(data)) return;
+        Clipboard.SetText(data.TelegramText()); MessageBox.Show("Отчёт скопирован. Вставьте его в Telegram.", "Готово");
+    }
+
+    private bool ConfirmReportValues(ReportData data)
+    {
+        if (data.Total == 0 && data.Cash == 0 && data.Food == 0)
+            return MessageBox.Show("Похоже, суммы не заполнены. Всё равно продолжить?", "Проверьте отчёт", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+        if (!data.RevenueReconciles)
+            return MessageBox.Show($"Выручка LGS отличается от наличных + эквайринга на {data.RevenueDifference:N0} ₽. Проверьте распознавание. Продолжить?", "Не сошлись суммы", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes;
+        return true;
     }
 
     private void Apply(ReportData d) { nums["revenue"].Value = d.Revenue; nums["topups"].Value = d.AccountTopUps; nums["services"].Value = d.Services; nums["food"].Value = d.Food; nums["other"].Value = d.OtherIncome; nums["cash"].Value = d.Cash; nums["acquiring"].Value = d.Acquiring; nums["online"].Value = d.OnlinePayments; nums["expenses"].Value = d.Expenses; RefreshPreview(); }
     private ReportData Current() => new() { Admin = selectedAdmin, Receiver = receiver.Text, Date = date.Value.Date, Shift = shift.Text, Revenue = nums["revenue"].Value, AccountTopUps = nums["topups"].Value, Services = nums["services"].Value, Food = nums["food"].Value, OtherIncome = nums["other"].Value, Cash = nums["cash"].Value, Acquiring = nums["acquiring"].Value, OnlinePayments = nums["online"].Value, Expenses = nums["expenses"].Value, Fee = nums["fee"].Value, ExtraGuest = nums["guest"].Value, HookahCount = (int)nums["hookahs"].Value, Envelope = nums["envelope"].Value, CashRemainder = nums["remainder"].Value };
-    private void RefreshPreview() { if (!reportPage || preview is null || nums.Count == 0) return; var d = Current(); preview.Text = d.TelegramText(); salary.Text = $"Начисление за смену: {d.ShiftSalary:N0} ₽ + кальяны {d.HookahBonus:N0} ₽ = {d.Salary:N0} ₽"; }
+    private void RefreshPreview() { if (!reportPage || preview is null || nums.Count == 0) return; var d = Current(); preview.Text = d.TelegramText(); salary.Text = $"Начисление за смену: {d.ShiftSalary:N0} ₽ + кальяны {d.HookahBonus:N0} ₽ = {d.Salary:N0} ₽"; reconciliation.Text = !ocrLoaded && nums.Values.All(x => x.Value == 0) ? "Вставьте скрин LGS или введите суммы вручную." : d.RevenueReconciles ? "✓ Выручка LGS совпадает с наличными + эквайрингом." : $"⚠ Проверьте суммы: разница выручки {d.RevenueDifference:N0} ₽."; reconciliation.ForeColor = !ocrLoaded && nums.Values.All(x => x.Value == 0) ? Color.Silver : d.RevenueReconciles ? Color.LightGreen : Color.DarkOrange; }
 
     private Label Title(string text, float size) => new() { Text = text, AutoSize = true, Font = new Font("Segoe UI", size, FontStyle.Bold), ForeColor = Yellow, Anchor = AnchorStyles.Left };
     private ComboBox Combo(string[] values) { var c = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190, BackColor = Card, ForeColor = Color.White }; c.Items.AddRange(values); return c; }

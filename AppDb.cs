@@ -16,6 +16,7 @@ public static class AppDb
         using var cmd = db.CreateCommand();
         cmd.CommandText = """
             CREATE TABLE IF NOT EXISTS admins(name TEXT PRIMARY KEY, pin_hash TEXT, pin_salt TEXT);
+            CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS reports(
               id INTEGER PRIMARY KEY AUTOINCREMENT, admin TEXT NOT NULL, report_date TEXT NOT NULL,
               shift TEXT NOT NULL, total REAL NOT NULL, food REAL NOT NULL, game_time REAL NOT NULL,
@@ -23,6 +24,21 @@ public static class AppDb
               UNIQUE(admin, report_date, shift));
             """;
         cmd.ExecuteNonQuery();
+    }
+
+    public static string? GetExcelPath()
+    {
+        using var db = new SqliteConnection(ConnectionString); db.Open();
+        using var cmd = db.CreateCommand(); cmd.CommandText = "SELECT value FROM settings WHERE key='excel_path'";
+        return cmd.ExecuteScalar() as string;
+    }
+
+    public static void SetExcelPath(string path)
+    {
+        using var db = new SqliteConnection(ConnectionString); db.Open();
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = "INSERT INTO settings(key,value) VALUES('excel_path',$v) ON CONFLICT(key) DO UPDATE SET value=$v";
+        cmd.Parameters.AddWithValue("$v", path); cmd.ExecuteNonQuery();
     }
 
     public static bool HasPin(string admin)

@@ -3,13 +3,17 @@ using Tesseract;
 
 namespace ColizeumReports;
 
+public sealed record OcrResult(ReportData Data, IReadOnlyList<string> MissingFields);
+
 public static partial class OcrService
 {
-    public static ReportData Read(string imagePath)
+    public static OcrResult Read(string imagePath)
     {
         var dataPath = Path.Combine(AppContext.BaseDirectory, "tessdata");
-        if (!File.Exists(Path.Combine(dataPath, "rus.traineddata")))
-            throw new FileNotFoundException("Не найден OCR-файл tessdata/rus.traineddata. Скачайте сборку из GitHub Actions целиком.");
+        var russianData = Path.Combine(dataPath, "rus.traineddata");
+        var englishData = Path.Combine(dataPath, "eng.traineddata");
+        if (!File.Exists(russianData) || !File.Exists(englishData))
+            throw new FileNotFoundException("Не найдены файлы OCR. Распакуйте всю папку приложения вместе с tessdata.");
 
         using var engine = new TesseractEngine(dataPath, "rus+eng", EngineMode.Default);
         engine.SetVariable("preserve_interword_spaces", "1");
@@ -17,41 +21,62 @@ public static partial class OcrService
         using var page = engine.Process(image);
         var text = page.GetText();
 
-        return new ReportData
+        var missing = new List<string>();
+        var revenue = Find(text, "Общая выручка", missing, "Общая выручка");
+        var topups = Find(text, "Пополнение аккаунтов", missing, "Пополнение аккаунтов");
+        var services = Find(text, "Услуги", missing, "Услуги");
+        var food = Find(text, "Еда", missing, "Еда");
+        var other = Find(text, "Прочие доходы", missing, "Прочие доходы");
+        var online = Find(text, ["Сумма онлайн-платежей", "Сумма онлайн платежей"], missing, "Онлайн-платежи");
+        var expenses = Find(text, "Расходы за смену", missing, "Расходы за смену");
+        var (cash, acquiring) = FindPair(text, "Нал/Безнал", missing);
+
+        return new OcrResult(new ReportData
         {
-            Revenue = Find(text, "Общая выручка"),
-            AccountTopUps = Find(text, "Пополнение аккаунтов"),
-            Services = Find(text, "Услуги"),
-            Food = Find(text, "Еда"),
-            OtherIncome = Find(text, "Прочие доходы"),
-            OnlinePayments = Find(text, "Сумма онлайн-платежей", "Сумма онлайн платежей"),
-            Expenses = Find(text, "Расходы за смену"),
-            Cash = FindPair(text, "Нал/Безнал", first: true),
-            Acquiring = FindPair(text, "Нал/Безнал", first: false)
-        };
+            Revenue = revenue,
+            AccountTopUps = topups,
+            Services = services,
+            Food = food,
+            OtherIncome = other,
+            OnlinePayments = online,
+            Expenses = expenses,
+            Cash = cash,
+            Acquiring = acquiring
+        }, missing);
     }
 
-    private static decimal Find(string text, params string[] labels)
+    private static decimal Find(string text, string label, List<string> missing, string displayName) =>
+        Find(text, [label], missing, displayName);
+
+    private static decimal Find(string text, string[] labels, List<string> missing, string displayName)
     {
         foreach (var line in text.Split('\n'))
-        foreach (var label in labels)
-            if (line.Contains(label, StringComparison.OrdinalIgnoreCase))
-                return LastNumber(line);
+        {
+            if (!labels.Any(label => line.Contains(label, StringComparison.OrdinalIgnoreCase))) continue;
+            var value = LastNumber(line);
+            if (value is null) { missing.Add(displayName); return 0; }
+            return value.Value;
+        }
+        missing.Add(displayName);
         return 0;
     }
 
-    private static decimal FindPair(string text, string label, bool first)
+    private static (decimal cash, decimal acquiring) FindPair(string text, string label, List<string> missing)
     {
         var line = text.Split('\n').FirstOrDefault(x => x.Contains(label, StringComparison.OrdinalIgnoreCase)) ?? "";
         var nums = NumberRegex().Matches(line).Select(x => Parse(x.Value)).ToArray();
-        if (nums.Length < 2) return 0;
-        return first ? nums[^2] : nums[^1];
+        if (nums.Length < 2)
+        {
+            missing.Add("Нал/Безнал");
+            return (0, 0);
+        }
+        return (nums[^2], nums[^1]);
     }
 
-    private static decimal LastNumber(string line)
+    private static decimal? LastNumber(string line)
     {
         var matches = NumberRegex().Matches(line);
-        return matches.Count == 0 ? 0 : Parse(matches[^1].Value);
+        return matches.Count == 0 ? null : Parse(matches[^1].Value);
     }
 
     private static decimal Parse(string value)
@@ -64,3 +89,4 @@ public static partial class OcrService
     [GeneratedRegex(@"\d[\d\s ]*(?:[,.]\d{1,2})?")]
     private static partial Regex NumberRegex();
 }
+
